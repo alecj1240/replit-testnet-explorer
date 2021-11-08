@@ -324,8 +324,26 @@ function copy(text) {
   inp.remove();
 }
 
+function truncate(fullStr, strLen) {
+    if (fullStr.length <= strLen) return fullStr;
+    
+    var separator = '...';
+    
+    var sepLen = separator.length,
+        charsToShow = strLen - sepLen,
+        frontChars = Math.ceil(charsToShow/2),
+        backChars = Math.floor(charsToShow/2);
+    
+    return fullStr.substr(0, frontChars) + 
+           separator + 
+           fullStr.substr(fullStr.length - backChars);
+};
+
 /** Main app */
 export default function App() {
+  const [viewAccount, setViewAccount] = useState(null);
+  const [viewTransaction, setViewTransaction] = useState(null);
+
   return (
     <VStack
       style={{
@@ -352,18 +370,31 @@ export default function App() {
             Replit Testnet Chain Explorer
           </h1>
           <h3> View transactions, accounts, and blocks on Replit's testnet.</h3>
+          { (viewAccount != null || viewTransaction != null) ? 
+        (
+          <p onClick={() => {setViewAccount(null); setViewTransaction(null)}} style={{cursor: "pointer"}}><u>Back to latest blocks</u></p> 
+        ) 
+        : null }
         </VStack>
       </HStack>
 
       <Divider />
-
-      <LatestBlockUI />
+      
+      { viewAccount != null ? (
+        <VStack>
+          <AccountUI accountId={viewAccount} />          
+        </VStack>
+      ) : viewTransaction != null ? 
+        (<DetailedTransactionUI transactionId={viewTransaction} setViewAccount={setViewAccount} />)
+        : 
+        (<LatestBlockUI setViewAccount={setViewAccount} setViewTransaction={setViewTransaction} />)
+      }
       <GlobalStyles />
     </VStack>
   );
 }
 
-function LatestBlockUI() {
+function LatestBlockUI(props) {
   const [latestBlock, setLatestBlock] = useState(null);
 
   useEffect(() => {
@@ -373,20 +404,21 @@ function LatestBlockUI() {
   }, []);
 
   const getLatestBlock = async () => {
-    const num = await provider.getBlockNumber();
+    const num = 172414; //await provider.getBlockNumber();
+    console.log(num);
     setLatestBlock(num); 
   };
 
   let content = [];
   if (latestBlock) {
     for (let i = 0; i < 10; i++) {
-      content.push(<BlockUI blockNumber={latestBlock - i} />);
+      content.push(<BlockUI blockNumber={latestBlock - i} setViewAccount={props.setViewAccount} setViewTransaction={props.setViewTransaction} />);
     }
   }
 
   return (
     <VStack>
-      <h3>Latest Blocks</h3>
+      <h3>Latest Blocks (not actually right now - set specific to block for testing)</h3>
       {content}
     </VStack>
   )
@@ -403,9 +435,16 @@ const BlockUI = (props) => {
   }, []);
 
   const getBlockInfo = async (num) => {
-    const block = await provider.getBlock(num);
+    const block = await provider.getBlockWithTransactions(num);
     setBlockInfo(block); 
   };
+
+  let transactions = [];
+  if (isOpen) {
+    for (let i = 0; i < blockInfo.transactions.length; i++) {
+      transactions.push(<TransactionUI transaction={blockInfo.transactions[i]} setViewAccount={props.setViewAccount} setViewTransaction={props.setViewTransaction} />);
+    }
+  }
 
   return(
     <VStack
@@ -434,50 +473,125 @@ const BlockUI = (props) => {
         >
           { blockInfo ? (
             <div>
-              <p><b>Block {blockInfo.number}</b> - {blockInfo.hash}</p>
+              <p><b>Block {blockInfo.number}</b> - {blockInfo.hash} </p>
               <p>Transactions: {blockInfo.transactions.length}, Timestamp: {blockInfo.timestamp}</p>
             </div>
            ) : (<p>Loading blocks</p>)}
         </HStack>
+        <ChevronRight
+          size={20}
+          style={{
+            transform: isOpen ? "rotate(90deg)" : "none",
+            color: "white",
+          }}
+        />
       </HStack>
       { isOpen ? (
-        <div>
+        <div style={{padding: "var(--space-8)"}}>
           <h3>Transactions</h3>
-          <BlockTransactionsUI blockNumber={props.blockNumber} />
+          {transactions}
         </div>
       ) : null}
     </VStack>
   );
 }
 
-const BlockTransactionsUI = (props) => {
-  const [blockInfo, setBlockInfo] = useState(null);
+const TransactionUI = (props) => {
+  return (
+    <VStack
+    style={{
+        backgroundColor: "var(--bg-root)",
+        border: "1px solid var(--outline-dimmest)",
+        borderRadius: "var(--br-8)",
+        margin: "var(--space-8) var(--space-16)",
+        padding: "var(--space-8)",
+        overflow: "hidden",
+      }}>
+      <p>Transaction: {" "}
+        <u 
+          style={{cursor: "pointer"}}
+          onClick={() => props.setViewTransaction(props.transaction.hash)}>
+            {props.transaction.hash}
+        </u>
+      </p>
+      <p> From {" "}
+        <u 
+          style={{cursor: "pointer"}}
+          onClick={() => props.setViewAccount(props.transaction.from)}>
+            {" " + truncate(props.transaction.from,20)}
+        </u> to {" "} 
+        <u 
+          style={{cursor: "pointer"}}
+          onClick={() => props.setViewAccount(props.transaction.to)}>
+            {truncate(props.transaction.to,20)}
+        </u>, confirmations: {props.transaction.confirmations}
+      </p>
+    </VStack>
+  )
+}
+
+const AccountUI = (props) => {
+  const [accountInfo, setAccountInfo] = useState(null);
+  const divisor = 1000000000000000000;
 
   useEffect(() => {
-    if (!blockInfo) {
-      getBlockInfo(props.blockNumber);
+    if (!accountInfo) {
+      getAccountInfo();
     }
   }, []);
 
-  const getBlockInfo = async (num) => {
-    const block = await provider.getBlockWithTransactions(num);
-    setBlockInfo(block); 
+  const getAccountInfo = async () => {
+    const balance = await provider.getBalance(props.accountId);
+    setAccountInfo(balance); 
   };
 
-  let content = [];
-  if (blockInfo) {
-    for (let i = 0; i < blockInfo.transactions.length; i++) {
-      content.push(<TransactionUI transaction={blockInfo.transactions[i]} />);
-    }
-  }
-
-  return(<div>{content}</div>);
-  
+  return (
+    <VStack>
+      <h3>Account {props.accountId}</h3>
+      <h3> Balance: {accountInfo != null ? (parseInt(accountInfo._hex, 16) / divisor) : "Loading..."} RΞ</h3>
+    </VStack>
+  )
 }
 
-const TransactionUI = (props) => {
+const DetailedTransactionUI = (props) => {
+  const [transactionInfo, setTransactionInfo] = useState(null);
+  const divisor = 1000000000000000000;
+
+  useEffect(() => {
+    if (!transactionInfo) {
+      getTransactionInfo();
+    }
+  }, []);
+
+  const getTransactionInfo = async () => {
+    const t = await provider.getTransaction(props.transactionId);
+    setTransactionInfo(t); 
+  };
+
   return (
-    <p>{props.blockHash}</p>
+    <VStack>
+      <h3>Transaction {props.transactionId}</h3>
+      { transactionInfo != null ? (
+      <VStack>
+        <p> From {" "}
+          <u 
+            style={{cursor: "pointer"}}
+            onClick={() => props.setViewAccount(transactionInfo.from)}>
+              {" " + truncate(transactionInfo.from,20)}
+          </u> to {" "} 
+          <u 
+            style={{cursor: "pointer"}}
+            onClick={() => props.setViewAccount(transactionInfo.to)}>
+              {truncate(transactionInfo.to,20)}
+          </u>
+        </p>
+        <p> value: {(parseInt(transactionInfo.value._hex, 16) / divisor)} RΞ</p>
+        <p> gas limit: {(parseInt(transactionInfo.gasLimit._hex, 16) / divisor)} RΞ, gas price: {(parseInt(transactionInfo.gasPrice._hex, 16) / divisor)} RΞ</p>
+        <p> confirmations: {transactionInfo.confirmations} </p>
+      </VStack>
+      ) : (<p>Loading...</p>)}
+    </VStack>
+      
   )
 }
 
